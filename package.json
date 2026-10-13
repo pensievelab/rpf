@@ -1,0 +1,31 @@
+{
+  "name": "@pensieve/rpf",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Recursive Priced Falsification: Asymmetric Trials with a Forecast-Scored Planner for Autonomous Discovery. A skill and a set of tools for any coding agent",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "rpf": "bin/rpf.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "examples",
+    "paper",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pensievelab/rpf.git"
+  },
+  "homepage": "https://github.com/pensievelab/rpf"
+}
