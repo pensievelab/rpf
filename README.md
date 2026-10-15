@@ -160,10 +160,14 @@ an agent's judgment. They are one command, `rpf`, and they travel with the skill
 | `rpf worker` | Starts a worker in a fresh, headless session of the host and stops it at its stake. |
 | `rpf check` | Says whether a report is complete. If not, prints the message that sends it back to its author. |
 | `rpf recall` | Writes the five-part message for a failed gate: the check, the evidence, the scope, the test, the tries left. |
-| `rpf desk` | Ranks cards by odds x size / stake and picks: the best of each lens, two more, and one long shot. Under the floor it picks nothing, which is the signal to stop. |
-| `rpf trial` | Records how a trial ended: paid, alive or dead. It needs the brief's record, so a forecast always comes before its result. |
+| `rpf desk` | Ranks cards by odds x size / stake and picks: the best of each lens, two more, and one long shot. Each card's odds move towards what its family has paid at its stage. Under the floor it picks nothing, which is the signal to stop. |
+| `rpf trial` | Records how a trial ended: paid, alive or dead. It needs the brief's record, so a forecast always comes before its result; a gain needs its paired comparison; a lesson stays on the trial that taught it. |
+| `rpf pair` | Compares the base and the new form case by case on the same inputs: outputs that differ, cases wrong in only one, and differing outputs where one side is right. Exact, within a control, or a trade. |
 | `rpf close`, `rpf reopen`, `rpf closed` | Closes or parks a direction with the grade of its evidence and the number that reopens it. |
-| `rpf round`, `rpf score` | Records a round under the version of the workflow that ran it; scores the forecasts by role and each version by its rounds. |
+| `rpf frontier` | Reads the best score outside the run, with the time; how far a step usually goes and how long a top holds; whether our margin beats a usual step. `--watch` returns when the top moves. |
+| `rpf numbers` | Lists every number in a text that no result file holds, and every forbidden word. Run it on anything that goes out. |
+| `rpf round`, `rpf score` | Records a round under the version of the workflow that ran it; scores the forecasts by role, what each family of trial has paid at each stage, and each version by its rounds. |
+| `rpf digest` | The record for a fresh planner after a round that kept nothing: what paid, the record by family and stage, the closed list, the lessons. Facts and prices, no plan. |
 
 ## Hosts
 
@@ -191,12 +195,15 @@ rpf worker --brief .rpf/briefs/t1.md --host claude \
 ```
 paper/                  the paper
 skills/rpf/SKILL.md     the planner's workflow: one round, the gates, what may be accepted
-skills/rpf/roles/       scout, pricer, builder, breaker, red team
+skills/rpf/roles/       scout, thinker, pricer, builder, breaker, red team
 bin/rpf.mjs             the tools
 src/contracts.mjs       the fields of every report, and the recall message
 src/desk.mjs            the ranking rule
 src/record.mjs          the ledger and the closed list
-src/score.mjs           forecast scores, and the score of each workflow version
+src/score.mjs           forecast scores, the record by family and stage, and the score of each workflow version
+src/pair.mjs            the paired comparison that decides "exact"
+src/frontier.mjs        the frontier: its moves, and our margin
+src/numbers.mjs         numbers in a text against the result files
 examples/popcount/      a small task with an exact evaluator
 test/                   node --test
 ```

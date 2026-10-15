@@ -52,6 +52,33 @@ export function brier(pairs) {
   return p.length ? mean(p.map((x) => (x.odds - (x.happened ? 1 : 0)) ** 2)) : null
 }
 
+/**
+ * What each kind of trial has paid so far, computed from the ledger and never kept by hand: by
+ * family, by stage, by lens, or by several at once (`['family', 'stage']`). Settled trials are the
+ * paid and the dead; a trial still alive settles nothing. `size_bias` is how results ran against the
+ * planner's forecasts, as a log ratio (above zero: larger than forecast).
+ */
+export function recordBy(trials, keys = ['family']) {
+  const by = new Map()
+  for (const t of trials) {
+    const name = keys.map((k) => t[k] ?? '(none)').join(' / ')
+    if (!by.has(name)) by.set(name, [])
+    by.get(name).push(t)
+  }
+  return [...by].map(([name, ts]) => {
+    const settled = ts.filter((t) => typeof t.paid === 'boolean'), paid = settled.filter((t) => t.paid)
+    const gains = paid.map((t) => Number(t.gain ?? 0)).filter(Number.isFinite)
+    const logs = ts.filter((t) => !isChance(t, number(t.forecast?.planner), number(t.result)))
+      .map((t) => [number(t.forecast?.planner), number(t.result)]).filter(([f, r]) => f > 0 && r > 0).map(([f, r]) => Math.log(r / f))
+    return {
+      [keys.join(' / ')]: name, trials: ts.length, settled: settled.length, paid: paid.length, alive: ts.length - settled.length,
+      pay_rate: settled.length ? paid.length / settled.length : null,
+      gain: gains.reduce((s, x) => s + x, 0), largest_gain: gains.length ? Math.max(...gains) : null,
+      size_bias: logs.length ? mean(logs) : null,
+    }
+  }).sort((a, b) => b.gain - a.gain || b.settled - a.settled)
+}
+
 /** A round's yield: exact gain kept for each million tokens spent. Trades and pending gains count 0. */
 export function roundYield(round) {
   return round.tokens > 0 ? (round.gain_kept / round.tokens) * 1e6 : null

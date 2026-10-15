@@ -6,9 +6,12 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { missing, recall } from '../src/contracts.mjs'
-import { familyRecord, value, pick } from '../src/desk.mjs'
+import { familyRecord, cardRecord, value, pick } from '../src/desk.mjs'
 import { openLedger, openClosedList } from '../src/record.mjs'
-import { forecastBias, chanceScore, brier, bestVersion, number } from '../src/score.mjs'
+import { forecastBias, chanceScore, brier, bestVersion, number, recordBy } from '../src/score.mjs'
+import { cases, compare, verdict } from '../src/pair.mjs'
+import { unfound } from '../src/numbers.mjs'
+import { parseTop, moves, margin } from '../src/frontier.mjs'
 
 const card = (o) => ({ id: 'c1', lens: 'ledger', claim: 'block B can be made with 2 fewer units', family: 'rewrite', size: 100, odds: 0.4, stage: 'paper', price_minutes: 20, cheapest_test: 'count B on the model', falsifier: 'under 50', files: ['src/b.rs:10'], touches_closed: 'none', premises: [{ claim: 'B is called once', checked_by: 'grep -c' }], untested_part: 'the carry', ...o })
 
@@ -55,7 +58,11 @@ test('the desk takes the best card of each lens, two more, and one long shot', (
 test('the ledger is append-only and a closure carries the number that reopens it', () => {
   const d = mkdtempSync(join(tmpdir(), 'rpf-'))
   const ledger = openLedger(join(d, 'ledger.jsonl'))
-  const t = { id: 't1', round: 1, role: 'pricer', question: 'q', forecast: { planner: 50, worker: 80 }, falsifier: 'under 20', stake_minutes: 30, result: 95, outcome: 'paid' }
+  const t = { id: 't1', round: 1, role: 'pricer', question: 'q', forecast: { planner: 50, worker: 80 }, falsifier: 'under 20', stake_minutes: 30, result: 95, outcome: 'paid', family: 'rewrite', stage: 'paper' }
+  // a trial that seeks a gain says its family and stage, so the record can set the next odds
+  assert.throws(() => ledger.append({ ...t, family: undefined }), /family/)
+  assert.throws(() => ledger.append({ ...t, stage: undefined, role: 'builder' }), /stage/)
+  assert.throws(() => ledger.append({ ...t, lesson: { unless: 'x' } }), /lesson/)
   assert.equal(ledger.append(t).paid, true)
   assert.equal(ledger.append({ ...t, id: 't0', outcome: 'alive' }).paid, null)
   assert.throws(() => ledger.append({ ...t, id: 'tx', outcome: 'kept' }), /outcome/)
@@ -155,13 +162,31 @@ test('a brief seals the forecast, a worker runs in its own process, a trial need
   const breaker = readFileSync(run('brief', '--id', 't3', '--role', 'breaker', '--question', 'does it hold?', '--forecast', '0.1', '--falsifier', 'one failing case', '--from', join(d, 'build.json')).trim(), 'utf8')
   assert.match(breaker, /lines 3 to 5 are new/)
   assert.doesNotMatch(breaker, /because of the mask/)
-  assert.match(run('trial', '--id', 't2', '--result', '52', '--outcome', 'paid', '--gain', '14', '--worker-forecast', '50'), /appended t2/)
+  // a paid trial needs its paired comparison with the base on the same inputs
+  assert.throws(() => run('trial', '--id', 't2', '--result', '52', '--outcome', 'paid', '--gain', '14'), (e) => /paired comparison/.test(e.stderr))
+  const rows66 = Array.from({ length: 4 }, (_, i) => ({ case: i, ok: true, output: i, cost: 66 }))
+  writeFileSync(join(d, 'base.jsonl'), rows66.map((r) => JSON.stringify(r)).join('\n') + '\n')
+  writeFileSync(join(d, 'new.jsonl'), rows66.map((r) => JSON.stringify({ ...r, cost: 52 })).join('\n') + '\n')
+  assert.match(run('pair', join(d, 'base.jsonl'), join(d, 'new.jsonl'), '--id', 't2'), /verdict: exact/)
+  assert.match(run('trial', '--id', 't2', '--result', '52', '--outcome', 'paid', '--gain', '14', '--worker-forecast', '50', '--lesson', 'the mask makes the carry free', '--unless', 'the mask is wider than 8 bits'), /appended t2/)
   const rows = readFileSync(join(d, '.rpf', 'ledger.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(rows[0].forecast, { planner: '40 to 60', worker: '45 to 55' })
-  assert.deepEqual([rows[0].stake_minutes, rows[0].family, rows[0].odds, rows[0].paid, rows[1].paid], [5, 'rewrite', 0.4, null, true])
+  assert.deepEqual([rows[0].stake_minutes, rows[0].family, rows[0].stage, rows[0].lens, rows[0].odds, rows[0].paid, rows[1].paid], [5, 'rewrite', 'paper', 'ledger', 0.4, null, true])
+  assert.deepEqual([rows[1].pair.verdict, rows[1].pair.cost_diff, rows[1].lesson.unless], ['exact', -14, 'the mask is wider than 8 bits'])
+  assert.ok(Date.now() - new Date(rows[1].recorded_at) < 60_000) // the clock stamps it, not the planner
   run('round', '--round', '1', '--version', '1', '--gain', '14', '--tokens', '200000')
   const score = JSON.parse(run('score'))
   assert.deepEqual([score.trials, score.paid, score.alive], [2, 1, 1])
+  assert.deepEqual(score.record.map((r) => [r.family, r.settled, r.paid, r.alive, r.gain]), [['rewrite', 1, 1, 1, 14]])
+  assert.equal(JSON.parse(run('score', '--by', 'family,stage')).record[0]['family / stage'], 'rewrite / paper')
+  // a fresh planner's digest comes from the record alone
+  const digest = run('digest')
+  assert.match(digest, /## What paid\n\n- t2 \(rewrite, paper\): gain 14, pair exact/)
+  assert.match(digest, /\| rewrite \/ paper \| 1 \| 1 of 1 \| 1 \| 14 \|/)
+  assert.match(digest, /- t2 \(rewrite, paid\): the mask makes the carry free \(unless the mask is wider than 8 bits\)/)
+  assert.ok(existsSync(join(d, '.rpf', 'digest.md')))
+  assert.match(run('digest', '--find', 'MASK'), /the mask makes the carry free/)
+  assert.doesNotMatch(run('digest', '--find', 'nothing like it'), /mask/)
   assert.equal(score.size_forecasts_by_role.planner.n, 2) // the forecasts the tools write are the ones the score reads
   assert.equal(score.rounds[0].yield_per_million_tokens, 70)
 })
@@ -188,9 +213,104 @@ test('a worker on a host: the host gets its own flags, then the brief as one pro
 test('the example task: the seed scores 66 and a wrong program has no score', async () => {
   const { evaluate } = await import('../examples/popcount/evaluate.mjs')
   const seed = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'popcount', 'program.txt'), 'utf8')
-  assert.deepEqual(evaluate(seed), { ok: true, wrong: 0, first_wrong: [], ops: 22, registers: 3, score: 66 })
+  const { cases: perCase, ...summary } = evaluate(seed)
+  assert.deepEqual(summary, { ok: true, wrong: 0, first_wrong: [], ops: 22, registers: 3, score: 66 })
+  assert.deepEqual([perCase.length, perCase[255]], [256, { case: 255, ok: true, output: 8, cost: 66 }])
   const bad = evaluate('out = x & 1')
   assert.equal(bad.score, null)
   assert.equal(bad.wrong, 254)
   assert.throws(() => evaluate('out = y + 1'))
+})
+
+test('a paired comparison decides exact: the three numbers, and a control where nothing aligns', () => {
+  const run = (ok, out = ok.map((o, i) => (o ? i : -1))) => cases(ok.map((o, i) => ({ case: i, ok: o, output: out[i], cost: 10 })))
+  const base = run([true, true, false, false])
+  // the same verdicts, and the outputs differ only where both runs are wrong: exact
+  const same = compare(base, run([true, true, false, false], [0, 1, 7, 9]))
+  assert.deepEqual([same.outputs_differ, same.wrong_in_one, same.differ_where_one_right, verdict(same)], [2, 0, 0, 'exact'])
+  // a case that passed now fails: not exact, whatever it saves
+  const worse = compare(base, run([true, false, true, false]))
+  assert.deepEqual([worse.pass_to_fail, worse.fail_to_pass, worse.wrong_in_one, verdict(worse)], [1, 1, 2, 'not exact'])
+  // the base against itself with only its randomness moved changed as many verdicts: within control,
+  // but only while it fails no more cases than the base
+  const control = compare(base, run([false, true, true, false]))
+  assert.equal(verdict(worse, control), 'within control')
+  assert.equal(verdict(compare(base, run([false, false, true, false])), control), 'not exact')
+  // without outputs the verdicts stand in for them
+  const bare = compare(cases([{ case: 'a', ok: true }]), cases([{ case: 'a', ok: true }]))
+  assert.deepEqual([bare.outputs, verdict(bare)], ['the verdicts only', 'exact'])
+  // the cost change is paired; two separate draws would carry the spread of both
+  const c = compare(cases([1, 5, 9].map((x, i) => ({ case: i, ok: true, cost: x }))), cases([0, 4, 8].map((x, i) => ({ case: i, ok: true, cost: x }))))
+  assert.deepEqual([c.cost.diff, c.cost.se_paired], [-1, 0])
+  assert.ok(c.cost.se_unpaired > 3)
+  assert.throws(() => compare(base, run([true, true, false])), /not the same inputs/)
+  assert.throws(() => compare(cases([{ case: 1, ok: true, input: 'x' }]), cases([{ case: 1, ok: true, input: 'y' }])), /different inputs/)
+  assert.throws(() => cases([{ case: 1 }]), /"ok"/)
+})
+
+test('numbers that go out are found in the record, and forbidden words are caught', () => {
+  const r = unfound('Gain 1,236.50 of 70.8%, in 9 rounds of 2026; the top 940337645 and 4417.\nNamed Rival here.', ['{"gain": 1236.5, "share": 70.8}', 'top 940,337,645'], { forbid: ['rival'] })
+  assert.deepEqual(r.unfound, [{ value: '4417', lines: [1] }]) // small counts and years are skipped; 1,236.50 is 1236.5
+  assert.deepEqual(r.forbidden, [{ word: 'rival', lines: [2] }])
+})
+
+test('the frontier: the top, its usual step and hold, and whether our margin beats it', () => {
+  assert.equal(parseTop('{"top": 940337645}'), 940337645)
+  assert.equal(parseTop('best: 1,236 (by someone)\nmore'), 1236)
+  assert.throws(() => parseTop('nothing here'), /no number/)
+  const reads = [['2026-10-13T00:00:00Z', 1000], ['2026-10-13T02:00:00Z', 990], ['2026-10-13T03:00:00Z', 990], ['2026-10-13T06:00:00Z', 985], ['2026-10-13T07:00:00Z', 991]].map(([at, top]) => ({ at, top }))
+  const m = moves(reads, 'lower')
+  assert.deepEqual([m.top, m.steps.length, m.median_hold_hours, m.since], [985, 2, 3, '2026-10-13T06:00:00.000Z']) // a worse read is not a move
+  assert.ok(Math.abs(m.median_step - (0.01 + 5 / 990) / 2) < 1e-12)
+  assert.equal(margin(984, 985, 'lower', m.median_step).beats_usual_step, false)
+  assert.equal(margin(970, 985, 'lower', m.median_step).beats_usual_step, true)
+  assert.ok(margin(990, 985, 'lower').ahead < 0)
+})
+
+test('the command line: pair, numbers, frontier, a thinker, and odds from the record by stage', () => {
+  const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'rpf.mjs')
+  const d = mkdtempSync(join(tmpdir(), 'rpf-new-'))
+  const run = (...a) => execFileSync(process.execPath, [bin, ...a, '--dir', join(d, '.rpf')], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+  run('init')
+  // the example's evaluator gives one line a case, so two programs pair on the same 256 inputs
+  const ex = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'popcount')
+  const evalCases = (prog) => execFileSync(process.execPath, [join(ex, 'evaluate.mjs'), prog, '--cases'], { encoding: 'utf8' })
+  writeFileSync(join(d, 'base.jsonl'), evalCases(join(ex, 'program.txt')))
+  writeFileSync(join(d, 'wrong.txt'), 'out = x & 1\n')
+  writeFileSync(join(d, 'wrong.jsonl'), evalCases(join(d, 'wrong.txt')))
+  assert.match(run('pair', join(d, 'base.jsonl'), join(d, 'base.jsonl')), /256 cases[\s\S]*verdict: exact/)
+  assert.throws(() => run('pair', join(d, 'base.jsonl'), join(d, 'wrong.jsonl'), '--id', 'w'), (e) => /pass to fail 254/.test(e.stdout) && /verdict: not exact/.test(e.stdout))
+  assert.equal(JSON.parse(readFileSync(join(d, '.rpf', 'pairs', 'w.json'), 'utf8')).verdict, 'not exact')
+  // a trial whose pair is not exact is a trade, not a gain
+  writeFileSync(join(d, '.rpf', 'cards', 's.jsonl'), JSON.stringify(card({ id: 'k' })) + '\n')
+  run('brief', '--id', 'w', '--role', 'builder', '--question', 'q', '--forecast', '52', '--falsifier', 'f', '--card', 'k')
+  assert.throws(() => run('trial', '--id', 'w', '--result', '3', '--outcome', 'paid'), (e) => /that is a trade/.test(e.stderr))
+  // numbers in a note that no file of the record holds, and words that must not go out
+  writeFileSync(join(d, 'note.md'), 'The score fell from 66 to 4417 points.\nThanks to Rival.\n')
+  writeFileSync(join(d, '.rpf', 'forbidden.txt'), 'rival\n')
+  assert.throws(() => run('numbers', join(d, 'note.md'), '--from', join(d, 'base.jsonl')), (e) => /4417 +line 1/.test(e.stdout) && !/ 66 +line/.test(e.stdout) && /forbidden "rival"/.test(e.stdout))
+  // the frontier through the task's own command: it moves on the third read
+  writeFileSync(join(d, 'board.mjs'), "import { readFileSync, writeFileSync, existsSync } from 'node:fs'\nconst f = process.argv[2], n = existsSync(f) ? Number(readFileSync(f, 'utf8')) : 0\nwriteFileSync(f, String(n + 1))\nconsole.log(JSON.stringify({ top: n < 2 ? 1000 : 990 }))\n")
+  const cmd = `"${process.execPath}" "${join(d, 'board.mjs')}" "${join(d, 'reads.txt')}"`
+  assert.throws(() => run('frontier'), (e) => /name the frontier once/.test(e.stderr))
+  assert.match(run('frontier', '--cmd', cmd, '--better', 'lower'), /top 1000, read at \d\d:\d\d[\s\S]*no move seen yet/)
+  assert.match(run('frontier', '--watch', '--every', '0.05', '--for', '1', '--ours', '989'), /the top moved: 1000 to 990[\s\S]*1 moves seen, the usual step 1\.000%[\s\S]*ours 989: ahead by 0\.101%, under the usual step/)
+  assert.deepEqual(JSON.parse(run('frontier', '--json')).top, 990)
+  // a thinker reads no record
+  assert.throws(() => run('brief', '--id', 'th', '--role', 'thinker', '--question', 'q', '--forecast', '0', '--falsifier', 'f', '--read', 'x'), (e) => /reads no record/.test(e.stderr))
+  const thinker = readFileSync(run('brief', '--id', 'th', '--role', 'thinker', '--question', 'beat 66', '--forecast', '0', '--falsifier', 'f').trim(), 'utf8')
+  assert.match(thinker, /# Thinker[\s\S]*## Read nothing[\s\S]*cards\/th\.jsonl/)
+  assert.doesNotMatch(thinker, /## Read only these/)
+})
+
+test('odds move towards the family at the card\'s stage once it has a record, else the family', () => {
+  const t = (stage, paid) => ({ family: 'rewrite', stage, paid })
+  const trials = [t('build', true), t('build', true), t('build', true), t('paper', false), t('paper', false)]
+  assert.deepEqual(cardRecord(trials, card({ stage: 'build' })), { by: 'family and stage', record: [3, 3] })
+  assert.deepEqual(cardRecord(trials, card({ stage: 'paper' })), { by: 'family', record: [3, 5] }) // two settled at that stage is not enough
+  assert.equal(value(card({ stage: 'build', odds: 0.4 }), { trials }).odds, (4 * 0.4 + 3) / 7)
+  assert.deepEqual(familyRecord(trials, 'rewrite', 'paper'), [0, 2])
+  const rec = recordBy([{ family: 'a', stage: 'build', paid: true, gain: 5, forecast: { planner: 10 }, result: 20 }, { family: 'a', stage: 'paper', paid: null }], ['family'])
+  assert.deepEqual([rec[0].settled, rec[0].paid, rec[0].alive, rec[0].largest_gain, Math.exp(rec[0].size_bias)], [1, 1, 1, 5, 2])
+  assert.match(missing('card', card({ stage: 'hunch' })).join(' '), /stage/)
 })

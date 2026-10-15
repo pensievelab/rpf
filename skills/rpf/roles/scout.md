@@ -7,7 +7,8 @@ seconds, you may run it, and then the card carries the measured size and `stage:
 A card is one idea priced before anything is built: one JSON object a line, in the file your
 brief names. Its fields (`rpf contracts` prints them):
 
-- `id`, `lens`, `family` (the kind of technique), `stage` (paper, model or build);
+- `id`, `lens`, `family` (the kind of technique), `stage`: how far its size has been measured
+  (`paper`, `model`, `pilot` for a small part built, or `build`);
 - `claim`: one sentence that a script can refute;
 - `size`: a number, the gain in units of the objective if it works; and, if the idea frees or
   uses a unit of a second resource, `resource_units` (optional);

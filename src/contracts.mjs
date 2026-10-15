@@ -24,6 +24,10 @@ export const OPTIONAL = {
   redteam: ['cards (ideas that came up beside a challenge, each with the fields of a card)'],
 }
 export const VERDICTS = { price: ['alive', 'dead'], build: ['accepted', 'not accepted', 'trade'], break: ['BROKEN', 'NOT BROKEN'] }
+// how far a card's size has been measured: argued on paper, run on a model of the design, built in
+// part, or built. Forecasts err differently at each: first builds of a new form came in well over
+// forecast, and sums of measured parts close to it
+export const STAGES = ['paper', 'model', 'pilot', 'build']
 
 /** The fields a report lacks, and values that are not allowed. An empty list means it may go on. */
 export function missing(kind, report) {
@@ -33,6 +37,7 @@ export function missing(kind, report) {
   if (kind === 'card') {
     if (!(report.odds >= 0 && report.odds <= 1)) out.push('odds (a number from 0 to 1)')
     if (typeof report.size !== 'number') out.push('size (a number, in units of the objective)')
+    if (report.stage !== undefined && report.stage !== '' && !STAGES.includes(report.stage)) out.push(`stage (one of ${STAGES.join(', ')})`)
     for (const p of report.premises ?? []) {
       if (!p.claim || !p.checked_by) out.push(`premise without checked_by: ${p.claim ?? '?'}`)
     }

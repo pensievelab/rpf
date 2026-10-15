@@ -1,25 +1,38 @@
 // The desk: a script, not an agent. It ranks cards by expected gain per unit of stake and picks.
 import { missing } from './contracts.mjs'
 
-/** How this family's trials have ended so far: [paid, settled]. Trials still alive are not counted. */
-export function familyRecord(trials, family) {
+/**
+ * How this family's trials have ended so far: [paid, settled]. Trials still alive are not counted.
+ * With a stage, only the family's trials at that stage: a first build and a paper price of the same
+ * kind of idea pay at different rates.
+ */
+export function familyRecord(trials, family, stage) {
   let paid = 0, n = 0
-  for (const t of trials) if (t.family === family && typeof t.paid === 'boolean') { n += 1; paid += t.paid ? 1 : 0 }
+  for (const t of trials) if (t.family === family && (stage === undefined || t.stage === stage) && typeof t.paid === 'boolean') { n += 1; paid += t.paid ? 1 : 0 }
   return [paid, n]
 }
 
 /**
- * Odds times size over stake. The odds start as the scout's and move towards the family's record as
- * that record grows: the scout's figure counts as much as `weight` settled trials. With no record
- * the odds are the scout's own. `rate` is the exchange rate of the objective: what one unit of the
- * second resource is worth in units of the first (for a score that is a product T x Q it is T / Q).
+ * The record a card's odds move towards: the family at the card's stage once that holds
+ * `minByStage` settled trials, else the family as a whole.
+ */
+export function cardRecord(trials, card, minByStage = 3) {
+  const staged = familyRecord(trials, card.family, card.stage)
+  return staged[1] >= minByStage ? { by: 'family and stage', record: staged } : { by: 'family', record: familyRecord(trials, card.family) }
+}
+
+/**
+ * Odds times size over stake. The odds start as the scout's and move towards the record as it
+ * grows: the scout's figure counts as much as `weight` settled trials. With no record the odds are
+ * the scout's own. `rate` is the exchange rate of the objective: what one unit of the second
+ * resource is worth in units of the first (for a score that is a product T x Q it is T / Q).
  */
 export function value(card, { trials = [], rate = 0, weight = 4 } = {}) {
-  const [paid, n] = familyRecord(trials, card.family)
+  const { by, record: [paid, n] } = cardRecord(trials, card)
   const odds = (weight * Number(card.odds ?? 0) + paid) / (weight + n)
   const size = Number(card.size ?? 0) + rate * Math.abs(Number(card.resource_units ?? 0))
   const stake = Math.max(Number(card.price_minutes ?? 10), 1)
-  return { odds, size, stake, expected: odds * size, value: (odds * size) / stake }
+  return { odds, size, stake, expected: odds * size, value: (odds * size) / stake, record: { by, paid, settled: n } }
 }
 
 /**

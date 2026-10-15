@@ -11,6 +11,8 @@ A small task for a first run. It takes a minute to score and a few rounds to exh
   operations.
 - **Editable**: `program.txt` only. `evaluate.mjs` is not to be touched.
 - **The cheapest test** is the evaluator itself.
+- **Case by case**: `node evaluate.mjs <program> --cases` prints one line for each input, so two
+  programs can be compared on the same inputs with `rpf pair`.
 - **Nothing here needs the operator's word.** The floor: a gain of 2 points.
 
 To run it, install the skill into this folder and ask your agent:

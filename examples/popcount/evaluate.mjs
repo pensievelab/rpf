@@ -33,7 +33,7 @@ export function evaluate(text) {
   const lines = parse(text)
   const names = new Set(['x', 'out'])
   for (const l of lines) for (const s of [l.to, l.a, l.b]) if (s !== undefined && NAME.test(s)) names.add(s)
-  const wrong = []
+  const wrong = [], cases = []
   for (let x = 0; x < 256; x++) {
     const reg = { x }
     const val = (s) => {
@@ -45,15 +45,22 @@ export function evaluate(text) {
     let want = 0
     for (let b = 0; b < 8; b++) want += (x >> b) & 1
     if (reg.out !== want) wrong.push(x)
+    cases.push({ case: x, ok: reg.out === want, output: reg.out })
   }
   const ops = lines.filter((l) => l.op !== null).length, registers = names.size
-  return { ok: wrong.length === 0, wrong: wrong.length, first_wrong: wrong.slice(0, 5), ops, registers, score: wrong.length ? null : ops * registers }
+  // each case carries the program's cost, so two programs can be compared case by case (rpf pair)
+  for (const c of cases) c.cost = ops * registers
+  return { ok: wrong.length === 0, wrong: wrong.length, first_wrong: wrong.slice(0, 5), ops, registers, score: wrong.length ? null : ops * registers, cases }
 }
 
+// node evaluate.mjs [program.txt] [--cases]: the score, or with --cases one line for each input
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const file = process.argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), 'program.txt')
+  const perCase = process.argv.includes('--cases')
+  const file = process.argv.slice(2).find((a) => a !== '--cases') ?? join(dirname(fileURLToPath(import.meta.url)), 'program.txt')
   let result
   try { result = evaluate(readFileSync(file, 'utf8')) } catch (e) { result = { ok: false, error: e.message, score: null } }
-  console.log(JSON.stringify(result))
+  if (perCase && result.cases) { for (const c of result.cases) console.log(JSON.stringify(c)); process.exit(0) }
+  const { cases, ...summary } = result
+  console.log(JSON.stringify(summary))
   process.exit(result.ok ? 0 : 1)
 }

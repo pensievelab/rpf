@@ -8,7 +8,11 @@ In a large design, put the change behind a switch: with the switch off, the resu
 byte for byte. In a small one the two files are the switch; write `none` in that field.
 
 Compare the new form with the base **on identical inputs**, never across separate random draws.
-If the change shifts what the inputs mean, say so: the comparison must be rebuilt, not waived.
+Run both on the same cases, write each run's results one case a line (`{"case", "ok", "output",
+"cost"}`), and compare them with `rpf pair <base> <new> --id <your trial id>`. If the change moves
+how the evaluator draws its randomness, no two runs align: run the base a second time with only
+that randomness moved and pass it as `--control`. Say which you did; the comparison is rebuilt,
+never waived.
 
 The report is one JSON object (`rpf contracts` prints the fields):
 

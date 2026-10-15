@@ -5,6 +5,8 @@ import { dirname } from 'node:path'
 const TRIAL = ['id', 'round', 'role', 'question', 'forecast', 'falsifier', 'stake_minutes', 'result', 'outcome']
 // how a trial ended: a gain entered the accepted design; the idea goes on to the next hop; the idea ended here
 export const OUTCOMES = ['paid', 'alive', 'dead']
+// the trials that seek a gain: the record by family and stage is read from them, so they must say both
+export const GAIN_ROLES = ['pricer', 'builder']
 
 function readLines(path) {
   if (!existsSync(path)) return []
@@ -24,6 +26,11 @@ export function openLedger(path) {
       const lacks = TRIAL.filter((f) => trial[f] === undefined)
       if (lacks.length) throw new Error(`a trial needs: ${lacks.join(', ')}`)
       if (!OUTCOMES.includes(trial.outcome)) throw new Error(`outcome must be one of: ${OUTCOMES.join(', ')}`)
+      if (GAIN_ROLES.includes(trial.role)) {
+        const lacks = ['family', 'stage'].filter((f) => !trial[f])
+        if (lacks.length) throw new Error(`a ${trial.role}'s trial needs its ${lacks.join(' and ')} (from its card, or given), so that the record can set the next odds`)
+      }
+      if (trial.lesson !== undefined && !trial.lesson?.what) throw new Error('a lesson says what was learned: { what, unless }')
       if (readLines(path).some((t) => t.id === trial.id)) throw new Error(`trial ${trial.id} is already in the ledger`)
       // `paid` settles an idea for the record by family; a trial that is still alive settles nothing
       const row = { ...trial, kept: trial.outcome === 'paid', paid: trial.outcome === 'alive' ? null : trial.outcome === 'paid' }
